@@ -27,6 +27,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.current_subtitle_path = None
         self.worker_thread = None
 
+        # Enable drag and drop
+        self.setAcceptDrops(True)
+
         self._setup_ui()
         self._setup_menu()
         self._setup_shortcuts()
@@ -255,6 +258,15 @@ class MainWindow(QtWidgets.QMainWindow):
         self.open_button.clicked.connect(self._on_open_file)
         playback_group.addWidget(self.open_button)
 
+        # Trash button
+        self.trash_button = QtWidgets.QPushButton()
+        self.trash_button.setIcon(style.standardIcon(QtWidgets.QStyle.StandardPixmap.SP_TrashIcon))
+        self.trash_button.setIconSize(QtCore.QSize(28, 28))
+        self.trash_button.setFixedSize(50, 44)
+        self.trash_button.setToolTip("Move to Trash (Delete)")
+        self.trash_button.clicked.connect(self._on_delete_file)
+        playback_group.addWidget(self.trash_button)
+
         playback_group.addSpacing(10)
 
         # Previous button
@@ -305,7 +317,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.stop_button.setIcon(style.standardIcon(QtWidgets.QStyle.StandardPixmap.SP_MediaStop))
         self.stop_button.setIconSize(QtCore.QSize(28, 28))
         self.stop_button.setFixedSize(50, 44)
-        self.stop_button.setToolTip("Stop")
+        self.stop_button.setToolTip("Stop (Ctrl+.)")
         self.stop_button.clicked.connect(self._on_stop)
         playback_group.addWidget(self.stop_button)
 
@@ -338,7 +350,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.volume_button.setIcon(style.standardIcon(QtWidgets.QStyle.StandardPixmap.SP_MediaVolume))
         self.volume_button.setIconSize(QtCore.QSize(24, 24))
         self.volume_button.setFixedSize(44, 44)
-        self.volume_button.setToolTip("Mute/Unmute")
+        self.volume_button.setToolTip("Mute/Unmute (M)")
         self.volume_button.clicked.connect(self._on_toggle_mute)
         volume_group.addWidget(self.volume_button)
 
@@ -365,7 +377,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # Generate subtitle button
         self.generate_subtitle_button = QtWidgets.QPushButton("Gen Sub")
         self.generate_subtitle_button.setFixedSize(80, 44)
-        self.generate_subtitle_button.setToolTip("Generate Subtitles")
+        self.generate_subtitle_button.setToolTip("Generate Subtitles (G)")
         self.generate_subtitle_button.setStyleSheet("""
             QPushButton {
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
@@ -484,7 +496,7 @@ class MainWindow(QtWidgets.QMainWindow):
         file_menu.addSeparator()
 
         delete_action = file_menu.addAction("Move to Trash")
-        delete_action.setShortcut(QtGui.QKeySequence("D"))
+        delete_action.setShortcut(QtGui.QKeySequence(QtCore.Qt.Key.Key_Delete))
         delete_action.triggered.connect(self._on_delete_file)
 
         file_menu.addSeparator()
@@ -560,8 +572,24 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _setup_shortcuts(self):
         """Setup additional keyboard shortcuts."""
-        # These are handled by menu actions
-        pass
+        # Volume mute toggle
+        mute_shortcut = QtGui.QShortcut(QtGui.QKeySequence("M"), self)
+        mute_shortcut.activated.connect(self._on_toggle_mute)
+
+        # Generate subtitles
+        generate_shortcut = QtGui.QShortcut(QtGui.QKeySequence("G"), self)
+        generate_shortcut.activated.connect(self._on_generate_subtitles)
+
+        # Stop playback
+        stop_shortcut = QtGui.QShortcut(QtGui.QKeySequence("Ctrl+."), self)
+        stop_shortcut.activated.connect(self._on_stop)
+
+        # Delete with Delete/Backspace keys
+        delete_shortcut1 = QtGui.QShortcut(QtGui.QKeySequence(QtCore.Qt.Key.Key_Delete), self)
+        delete_shortcut1.activated.connect(self._on_delete_file)
+
+        delete_shortcut2 = QtGui.QShortcut(QtGui.QKeySequence(QtCore.Qt.Key.Key_Backspace), self)
+        delete_shortcut2.activated.connect(self._on_delete_file)
 
     def _load_settings(self):
         """Load settings from config."""
@@ -616,7 +644,7 @@ class MainWindow(QtWidgets.QMainWindow):
             # Enable subtitle controls
             self._enable_subtitle_controls()
             self.generate_subtitle_button.setText("Regen")
-            self.generate_subtitle_button.setToolTip("Regenerate Subtitles")
+            self.generate_subtitle_button.setToolTip("Regenerate Subtitles (G)")
         else:
             # Load video without subtitles
             self.player.load_file(video_path)
@@ -625,7 +653,7 @@ class MainWindow(QtWidgets.QMainWindow):
             # Disable subtitle controls and enable generate button
             self._disable_subtitle_controls()
             self.generate_subtitle_button.setText("Gen Sub")
-            self.generate_subtitle_button.setToolTip("Generate Subtitles")
+            self.generate_subtitle_button.setToolTip("Generate Subtitles (G)")
             self.generate_subtitle_button.setEnabled(True)
 
     def _generate_subtitles(self, video_path: str, use_cache: bool = True):
@@ -673,7 +701,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # Enable subtitle controls
         self._enable_subtitle_controls()
         self.generate_subtitle_button.setText("Regen")
-        self.generate_subtitle_button.setToolTip("Regenerate Subtitles")
+        self.generate_subtitle_button.setToolTip("Regenerate Subtitles (G)")
 
         dialog.accept()
         self.statusBar().showMessage(f"Subtitles generated: {Path(subtitle_path).name}")
@@ -951,6 +979,20 @@ class MainWindow(QtWidgets.QMainWindow):
             self.statusBar().showMessage("Playlist shown")
         else:
             self.statusBar().showMessage("Playlist hidden")
+
+    def dragEnterEvent(self, event: QtGui.QDragEnterEvent):
+        """Handle drag enter event."""
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+
+    def dropEvent(self, event: QtGui.QDropEvent):
+        """Handle drop event."""
+        urls = event.mimeData().urls()
+        if urls:
+            file_path = urls[0].toLocalFile()
+            if file_path and Path(file_path).suffix.lower() in ['.mp4', '.mkv', '.avi', '.mov', '.m4v', '.webm']:
+                self._load_video(file_path)
+                event.acceptProposedAction()
 
     def closeEvent(self, event):
         """Handle window close event."""
