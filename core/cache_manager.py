@@ -59,16 +59,18 @@ class CacheManager:
 
     def get_srt_path(self, video_path: str) -> Path:
         """
-        Get path to cached SRT file for a video.
+        Get path to SRT file for a video (same directory as video).
 
         Args:
             video_path: Path to video file
 
         Returns:
-            Path to SRT file
+            Path to SRT file in the same directory as the video
         """
-        cache_key = self._get_cache_key(video_path)
-        return self.cache_dir / f"{cache_key}.srt"
+        video_path_obj = Path(video_path)
+        video_dir = video_path_obj.parent
+        video_stem = video_path_obj.stem
+        return video_dir / f"{video_stem}.srt"
 
     def get_metadata_path(self, video_path: str) -> Path:
         """

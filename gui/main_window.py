@@ -914,27 +914,20 @@ class MainWindow(QtWidgets.QMainWindow):
             )
             return
 
-        # Confirm deletion
-        if self.config.get('file.confirm_delete', True):
-            reply = QtWidgets.QMessageBox.question(
-                self,
-                "Move to Trash",
-                f"Move this video to trash?\n\n{Path(self.current_video_path).name}",
-                QtWidgets.QMessageBox.StandardButton.Yes | QtWidgets.QMessageBox.StandardButton.No
-            )
-
-            if reply != QtWidgets.QMessageBox.StandardButton.Yes:
-                return
-
         # Stop playback
         if self.player:
             self.player.stop()
 
-        # Move to trash
+        # Move to trash without confirmation
         if move_to_trash(self.current_video_path):
             self.statusBar().showMessage(f"Moved to trash: {Path(self.current_video_path).name}")
-            self.current_video_path = None
-            self.current_subtitle_path = None
+
+            # Play next video if available
+            if self.playlist.has_next():
+                self.playlist.play_next()
+            else:
+                self.current_video_path = None
+                self.current_subtitle_path = None
         else:
             QtWidgets.QMessageBox.critical(
                 self,
@@ -983,16 +976,44 @@ class MainWindow(QtWidgets.QMainWindow):
     def dragEnterEvent(self, event: QtGui.QDragEnterEvent):
         """Handle drag enter event."""
         if event.mimeData().hasUrls():
-            event.acceptProposedAction()
+            urls = event.mimeData().urls()
+            for url in urls:
+                file_path = url.toLocalFile()
+                if file_path and Path(file_path).exists():
+                    suffix = Path(file_path).suffix.lower()
+                    if suffix in ['.mp4', '.mkv', '.avi', '.mov', '.m4v', '.webm']:
+                        event.acceptProposedAction()
+                        return
+        event.ignore()
 
     def dropEvent(self, event: QtGui.QDropEvent):
         """Handle drop event."""
         urls = event.mimeData().urls()
-        if urls:
-            file_path = urls[0].toLocalFile()
-            if file_path and Path(file_path).suffix.lower() in ['.mp4', '.mkv', '.avi', '.mov', '.m4v', '.webm']:
+        if not urls:
+            event.ignore()
+            return
+
+        for url in urls:
+            file_path = url.toLocalFile()
+            logging.info(f"Dropped file: {file_path}")
+
+            if not file_path:
+                continue
+
+            path_obj = Path(file_path)
+            if not path_obj.exists():
+                logging.warning(f"File does not exist: {file_path}")
+                continue
+
+            suffix = path_obj.suffix.lower()
+            if suffix in ['.mp4', '.mkv', '.avi', '.mov', '.m4v', '.webm']:
                 self._load_video(file_path)
                 event.acceptProposedAction()
+                return
+            else:
+                logging.warning(f"Unsupported file format: {suffix}")
+
+        event.ignore()
 
     def closeEvent(self, event):
         """Handle window close event."""

@@ -29,8 +29,9 @@ echo "Conda 환경 활성화 중: ${ENV_NAME}"
 source $(conda info --base)/etc/profile.d/conda.sh
 conda activate ${ENV_NAME}
 
-# 모델 저장 경로
-MODEL_DIR="$HOME/Library/Application Support/SubWeave/models/nllb-200-distilled-600M"
+# 모델 저장 경로 (프로젝트 디렉토리 기준)
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+MODEL_DIR="$SCRIPT_DIR/data/models/nllb-200-distilled-600M"
 
 # 이미 모델이 존재하는지 확인
 if [ -d "$MODEL_DIR" ]; then

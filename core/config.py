@@ -81,13 +81,13 @@ class Config:
         self.settings = self._load_settings()
 
     def _get_app_dir(self) -> Path:
-        """Get application directory path."""
-        if os.name == 'posix':  # macOS/Linux
-            base = Path.home() / "Library" / "Application Support"
-        else:  # Windows
-            base = Path(os.environ.get('APPDATA', Path.home()))
-
-        app_dir = base / self.APP_NAME
+        """Get application directory path (relative to program location)."""
+        # Get the directory where this module is located
+        current_file = Path(__file__).resolve()
+        # Go up to the project root (assuming config.py is in core/)
+        project_root = current_file.parent.parent
+        # Create data directory in project root
+        app_dir = project_root / "data"
         return app_dir
 
     def _create_directories(self):
