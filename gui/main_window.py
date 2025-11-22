@@ -351,7 +351,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.volume_button.setIcon(style.standardIcon(QtWidgets.QStyle.StandardPixmap.SP_MediaVolume))
         self.volume_button.setIconSize(QtCore.QSize(24, 24))
         self.volume_button.setFixedSize(44, 44)
-        self.volume_button.setToolTip("Mute/Unmute (M)")
+        self.volume_button.setToolTip("Mute/Unmute (Ctrl+M)")
         self.volume_button.clicked.connect(self._on_toggle_mute)
         volume_group.addWidget(self.volume_button)
 
@@ -635,7 +635,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def _setup_shortcuts(self):
         """Setup additional keyboard shortcuts."""
         # Volume mute toggle
-        mute_shortcut = QtGui.QShortcut(QtGui.QKeySequence("M"), self)
+        mute_shortcut = QtGui.QShortcut(QtGui.QKeySequence("Ctrl+M"), self)
         mute_shortcut.activated.connect(self._on_toggle_mute)
 
         # Generate subtitles
@@ -992,14 +992,31 @@ class MainWindow(QtWidgets.QMainWindow):
         if self.player:
             self.player.stop()
 
+        # Get current playlist index before deletion
+        current_index = self.playlist.current_index
+
         # Move to trash without confirmation
         if move_to_trash(self.current_video_path):
             self.statusBar().showMessage(f"Moved to trash: {Path(self.current_video_path).name}")
 
-            # Play next video if available
-            if self.playlist.has_next():
-                self.playlist.play_next()
+            # Remove from playlist
+            if current_index >= 0:
+                self.playlist.remove_video(current_index)
+
+            # Play next video if available (after removal, same index points to next video)
+            if 0 <= current_index < self.playlist.get_video_count():
+                # Play video at same index (which is now the next video)
+                next_video = self.playlist.videos[current_index]
+                self.playlist.set_current_index(current_index)
+                self._load_video(str(next_video))
+            elif self.playlist.get_video_count() > 0:
+                # Play last video if we deleted the last one
+                last_index = self.playlist.get_video_count() - 1
+                last_video = self.playlist.videos[last_index]
+                self.playlist.set_current_index(last_index)
+                self._load_video(str(last_video))
             else:
+                # No more videos in playlist
                 self.current_video_path = None
                 self.current_subtitle_path = None
         else:
