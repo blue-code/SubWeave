@@ -48,8 +48,7 @@ class SubtitlePipeline:
             asr_config = self.config.get('asr')
             self.asr_engine = create_asr_engine(
                 model_size=asr_config.get('model_size', 'medium'),
-                compute_type=asr_config.get('compute_type', 'int8'),
-                device='cpu'
+                device=asr_config.get('device', 'cpu')
             )
             self.asr_engine.load_model()
 
@@ -65,12 +64,16 @@ class SubtitlePipeline:
                     f"Please download and convert NLLB model to CTranslate2 format."
                 )
 
+            # Get device from ASR config (translation uses same device preference)
+            device = self.config.get('asr.device', 'auto')
+
             self.translation_engine = create_translation_engine(
                 model_path=str(model_path),
                 source_lang=trans_config.get('source_lang', 'jpn_Jpan'),
                 target_lang=trans_config.get('target_lang', 'kor_Hang'),
                 beam_size=trans_config.get('beam_size', 4),
-                batch_size=trans_config.get('batch_size', 32)
+                batch_size=trans_config.get('batch_size', 32),
+                device=device
             )
             self.translation_engine.load_model()
 
@@ -118,8 +121,6 @@ class SubtitlePipeline:
             asr_segments = self.asr_engine.transcribe(
                 audio_path=video_path,
                 language=asr_config.get('language', 'ja'),
-                vad_filter=asr_config.get('vad_filter', True),
-                beam_size=asr_config.get('beam_size', 5),
                 progress_callback=asr_progress
             )
 
@@ -285,18 +286,19 @@ def create_subtitle_pipeline(
     # Create ASR engine
     asr_engine = create_asr_engine(
         model_size=asr_model_size,
-        compute_type=config.get('asr.compute_type', 'int8'),
-        device='cpu'
+        device=config.get('asr.device', 'cpu')
     )
 
     # Create translation engine if model path provided
     translation_engine = None
     if translation_model_path:
         trans_config = config.get('translation')
+        device = config.get('asr.device', 'auto')
         translation_engine = create_translation_engine(
             model_path=translation_model_path,
             source_lang=trans_config.get('source_lang', 'jpn_Jpan'),
-            target_lang=trans_config.get('target_lang', 'kor_Hang')
+            target_lang=trans_config.get('target_lang', 'kor_Hang'),
+            device=device
         )
 
     # Create cache manager

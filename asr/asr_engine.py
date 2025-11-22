@@ -1,16 +1,16 @@
 """
 Automatic Speech Recognition (ASR) Engine
-Uses faster-whisper for efficient Japanese speech-to-text transcription.
+Uses OpenAI Whisper (open-source) for efficient Japanese speech-to-text transcription.
 """
 from typing import List, Dict, Optional, Callable
 from pathlib import Path
 import logging
 
 try:
-    from faster_whisper import WhisperModel
+    import whisper
 except ImportError:
-    WhisperModel = None
-    logging.warning("faster-whisper not installed. ASR functionality will be disabled.")
+    whisper = None
+    logging.warning("openai-whisper not installed. ASR functionality will be disabled.")
 
 
 class ASRSegment:
@@ -45,48 +45,74 @@ class ASRSegment:
 
 
 class ASREngine:
-    """Automatic Speech Recognition engine using faster-whisper."""
+    """Automatic Speech Recognition engine using OpenAI Whisper (open-source)."""
 
     def __init__(
         self,
         model_size: str = "medium",
-        compute_type: str = "int8",
-        device: str = "cpu",
-        device_index: int = 0
+        device: str = "cpu"
     ):
         """
         Initialize ASR engine.
 
         Args:
-            model_size: Whisper model size (tiny, base, small, medium, large-v2, large-v3)
-            compute_type: Computation type (int8, float16, float32)
-            device: Device to use (cpu, cuda, auto)
-            device_index: Device index for multi-GPU setups
+            model_size: Whisper model size (tiny, base, small, medium, large, large-v2, large-v3)
+            device: Device to use (cpu, cuda, or mps for Apple Silicon GPU)
         """
-        if WhisperModel is None:
+        if whisper is None:
             raise ImportError(
-                "faster-whisper is not installed. "
-                "Please install it with: pip install faster-whisper"
+                "openai-whisper is not installed. "
+                "Please install it with: pip install openai-whisper"
             )
 
         self.model_size = model_size
-        self.compute_type = compute_type
-        self.device = device
-        self.device_index = device_index
-        self.model: Optional[WhisperModel] = None
+        self.device = self._validate_device(device)
+        self.model: Optional[object] = None
 
-        logging.info(f"Initializing ASR Engine with model: {model_size}, compute: {compute_type}")
+        logging.info(f"Initializing ASR Engine with model: {model_size}, device: {self.device}")
+
+    def _validate_device(self, device: str) -> str:
+        """
+        Validate and adjust device setting based on availability.
+
+        Args:
+            device: Requested device (cpu, cuda, mps)
+
+        Returns:
+            Valid device string
+        """
+        if device == "mps":
+            try:
+                import torch
+                if hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+                    logging.info("Using Apple Silicon GPU (MPS) for acceleration")
+                    return "mps"
+                else:
+                    logging.warning("MPS requested but not available, falling back to CPU")
+                    return "cpu"
+            except ImportError:
+                logging.warning("PyTorch not available, falling back to CPU")
+                return "cpu"
+        elif device == "cuda":
+            try:
+                import torch
+                if torch.cuda.is_available():
+                    logging.info(f"Using CUDA GPU: {torch.cuda.get_device_name(0)}")
+                    return "cuda"
+                else:
+                    logging.warning("CUDA requested but not available, falling back to CPU")
+                    return "cpu"
+            except ImportError:
+                logging.warning("PyTorch not available, falling back to CPU")
+                return "cpu"
+        else:
+            return "cpu"
 
     def load_model(self):
         """Load the Whisper model."""
         if self.model is None:
             try:
-                self.model = WhisperModel(
-                    self.model_size,
-                    device=self.device,
-                    compute_type=self.compute_type,
-                    device_index=self.device_index
-                )
+                self.model = whisper.load_model(self.model_size, device=self.device)
                 logging.info(f"Loaded Whisper model: {self.model_size}")
             except Exception as e:
                 logging.error(f"Failed to load Whisper model: {e}")
@@ -96,9 +122,6 @@ class ASREngine:
         self,
         audio_path: str,
         language: str = "ja",
-        vad_filter: bool = True,
-        beam_size: int = 5,
-        initial_prompt: Optional[str] = None,
         progress_callback: Optional[Callable[[float], None]] = None
     ) -> List[ASRSegment]:
         """
@@ -107,9 +130,6 @@ class ASREngine:
         Args:
             audio_path: Path to audio/video file
             language: Language code (ja for Japanese)
-            vad_filter: Enable Voice Activity Detection filter
-            beam_size: Beam size for decoding
-            initial_prompt: Optional initial prompt to guide transcription
             progress_callback: Optional callback for progress updates
 
         Returns:
@@ -125,31 +145,34 @@ class ASREngine:
         logging.info(f"Starting transcription: {audio_path}")
 
         try:
-            # Transcribe with faster-whisper
-            segments, info = self.model.transcribe(
+            # Transcribe with openai-whisper
+            result = self.model.transcribe(
                 audio_path,
                 language=language,
-                beam_size=beam_size,
-                vad_filter=vad_filter,
-                initial_prompt=initial_prompt
+                verbose=False
             )
 
             # Convert to ASRSegment objects
             result_segments = []
-            total_duration = info.duration if hasattr(info, 'duration') else None
+            total_duration = None
 
-            for segment in segments:
+            # Get duration from segments if available
+            if result.get('segments'):
+                last_segment = result['segments'][-1]
+                total_duration = last_segment.get('end', 0)
+
+            for segment in result.get('segments', []):
                 asr_segment = ASRSegment(
-                    start=segment.start,
-                    end=segment.end,
-                    text=segment.text.strip(),
+                    start=segment['start'],
+                    end=segment['end'],
+                    text=segment['text'].strip(),
                     language=language
                 )
                 result_segments.append(asr_segment)
 
                 # Call progress callback if provided
                 if progress_callback and total_duration:
-                    progress = (segment.end / total_duration) * 100
+                    progress = (segment['end'] / total_duration) * 100
                     progress_callback(progress)
 
             logging.info(f"Transcription completed: {len(result_segments)} segments")
@@ -162,8 +185,6 @@ class ASREngine:
     def transcribe_with_language_detection(
         self,
         audio_path: str,
-        vad_filter: bool = True,
-        beam_size: int = 5,
         progress_callback: Optional[Callable[[float], None]] = None
     ) -> List[ASRSegment]:
         """
@@ -171,8 +192,6 @@ class ASREngine:
 
         Args:
             audio_path: Path to audio/video file
-            vad_filter: Enable Voice Activity Detection filter
-            beam_size: Beam size for decoding
             progress_callback: Optional callback for progress updates
 
         Returns:
@@ -189,31 +208,35 @@ class ASREngine:
 
         try:
             # Transcribe without specifying language (auto-detect)
-            segments, info = self.model.transcribe(
+            result = self.model.transcribe(
                 audio_path,
-                beam_size=beam_size,
-                vad_filter=vad_filter
+                verbose=False
             )
 
-            detected_language = info.language if hasattr(info, 'language') else 'unknown'
+            detected_language = result.get('language', 'unknown')
             logging.info(f"Detected language: {detected_language}")
 
             # Convert to ASRSegment objects
             result_segments = []
-            total_duration = info.duration if hasattr(info, 'duration') else None
+            total_duration = None
 
-            for segment in segments:
+            # Get duration from segments if available
+            if result.get('segments'):
+                last_segment = result['segments'][-1]
+                total_duration = last_segment.get('end', 0)
+
+            for segment in result.get('segments', []):
                 asr_segment = ASRSegment(
-                    start=segment.start,
-                    end=segment.end,
-                    text=segment.text.strip(),
+                    start=segment['start'],
+                    end=segment['end'],
+                    text=segment['text'].strip(),
                     language=detected_language
                 )
                 result_segments.append(asr_segment)
 
                 # Call progress callback if provided
                 if progress_callback and total_duration:
-                    progress = (segment.end / total_duration) * 100
+                    progress = (segment['end'] / total_duration) * 100
                     progress_callback(progress)
 
             logging.info(f"Transcription completed: {len(result_segments)} segments")
@@ -237,7 +260,6 @@ class ASREngine:
 
 def create_asr_engine(
     model_size: str = "medium",
-    compute_type: str = "int8",
     device: str = "cpu"
 ) -> ASREngine:
     """
@@ -245,7 +267,6 @@ def create_asr_engine(
 
     Args:
         model_size: Whisper model size
-        compute_type: Computation type
         device: Device to use
 
     Returns:
@@ -253,6 +274,5 @@ def create_asr_engine(
     """
     return ASREngine(
         model_size=model_size,
-        compute_type=compute_type,
         device=device
     )

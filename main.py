@@ -14,6 +14,7 @@ from PySide6 import QtWidgets, QtCore
 
 from gui.main_window import MainWindow
 from core.config import get_config
+from utils.device_utils import log_device_info
 
 
 def setup_logging():
@@ -39,6 +40,9 @@ def setup_logging():
     logging.info(f"Version: {config.APP_VERSION}")
     logging.info(f"Log file: {log_file}")
     logging.info("=" * 60)
+
+    # Log device information (GPU/CPU detection)
+    log_device_info()
 
 
 def main():

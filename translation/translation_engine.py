@@ -24,7 +24,8 @@ class TranslationEngine:
         source_lang: str = "jpn_Jpan",
         target_lang: str = "kor_Hang",
         beam_size: int = 4,
-        batch_size: int = 32
+        batch_size: int = 32,
+        device: str = "auto"
     ):
         """
         Initialize translation engine.
@@ -35,6 +36,7 @@ class TranslationEngine:
             target_lang: Target language code (FLORES-200)
             beam_size: Beam size for decoding
             batch_size: Batch size for translation
+            device: Device to use (auto, cpu, cuda) - Note: MPS not supported by CTranslate2
         """
         if ctranslate2 is None or spm is None:
             raise ImportError(
@@ -47,12 +49,50 @@ class TranslationEngine:
         self.target_lang = target_lang
         self.beam_size = beam_size
         self.batch_size = batch_size
+        self.device = self._get_ctranslate2_device(device)
 
         self.translator: Optional[ctranslate2.Translator] = None
         self.sp_src: Optional[spm.SentencePieceProcessor] = None
         self.sp_tgt: Optional[spm.SentencePieceProcessor] = None
 
-        logging.info(f"Initializing Translation Engine: {source_lang} → {target_lang}")
+        logging.info(f"Initializing Translation Engine: {source_lang} → {target_lang}, device: {self.device}")
+
+    def _get_ctranslate2_device(self, device: str) -> str:
+        """
+        Get appropriate device for CTranslate2.
+
+        CTranslate2 supports: cpu, cuda, auto
+        Note: MPS is not supported, so we use CPU on macOS
+
+        Args:
+            device: Requested device
+
+        Returns:
+            Valid CTranslate2 device string
+        """
+        if device == "mps":
+            logging.info("CTranslate2 does not support MPS, using CPU")
+            return "cpu"
+        elif device == "cuda":
+            try:
+                import torch
+                if torch.cuda.is_available():
+                    logging.info(f"CTranslate2 using CUDA GPU")
+                    return "cuda"
+                else:
+                    logging.warning("CUDA requested but not available, using CPU")
+                    return "cpu"
+            except ImportError:
+                logging.warning("PyTorch not available to check CUDA, using CPU")
+                return "cpu"
+        elif device == "auto":
+            try:
+                from utils.device_utils import get_ctranslate2_device
+                return get_ctranslate2_device()
+            except ImportError:
+                return "auto"
+        else:
+            return device
 
     def load_model(self):
         """Load translation model and tokenizers."""
@@ -60,9 +100,12 @@ class TranslationEngine:
             raise FileNotFoundError(f"Model not found: {self.model_path}")
 
         try:
-            # Load CTranslate2 model
-            self.translator = ctranslate2.Translator(str(self.model_path))
-            logging.info(f"Loaded CTranslate2 model from: {self.model_path}")
+            # Load CTranslate2 model with device setting
+            self.translator = ctranslate2.Translator(
+                str(self.model_path),
+                device=self.device
+            )
+            logging.info(f"Loaded CTranslate2 model from: {self.model_path} on device: {self.device}")
 
             # Load SentencePiece tokenizers
             source_spm_path = self.model_path / "source.spm"
@@ -227,7 +270,8 @@ def create_translation_engine(
     source_lang: str = "jpn_Jpan",
     target_lang: str = "kor_Hang",
     beam_size: int = 4,
-    batch_size: int = 32
+    batch_size: int = 32,
+    device: str = "auto"
 ) -> TranslationEngine:
     """
     Factory function to create translation engine.
@@ -238,6 +282,7 @@ def create_translation_engine(
         target_lang: Target language code
         beam_size: Beam size for decoding
         batch_size: Batch size for translation
+        device: Device to use (auto, cpu, cuda)
 
     Returns:
         TranslationEngine instance
@@ -247,5 +292,6 @@ def create_translation_engine(
         source_lang=source_lang,
         target_lang=target_lang,
         beam_size=beam_size,
-        batch_size=batch_size
+        batch_size=batch_size,
+        device=device
     )

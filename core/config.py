@@ -8,6 +8,35 @@ from pathlib import Path
 from typing import Dict, Any, Optional
 
 
+def _get_default_device() -> str:
+    """
+    Get the default device based on available hardware.
+
+    Returns:
+        Device string: "mps" (macOS GPU), "cuda" (NVIDIA GPU), or "cpu"
+    """
+    try:
+        from utils.device_utils import get_optimal_device
+        return get_optimal_device()
+    except ImportError:
+        # Fallback if device_utils is not available
+        import platform
+        if platform.system() == "Darwin":  # macOS
+            try:
+                import torch
+                if hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+                    return "mps"
+            except:
+                pass
+        try:
+            import torch
+            if torch.cuda.is_available():
+                return "cuda"
+        except:
+            pass
+        return "cpu"
+
+
 class Config:
     """Application configuration manager."""
 
@@ -19,11 +48,9 @@ class Config:
     DEFAULT_SETTINGS = {
         # ASR Settings
         "asr": {
-            "model_size": "medium",  # tiny, base, small, medium, large-v2, large-v3
-            "compute_type": "int8",  # int8, float16, float32
+            "model_size": "medium",  # tiny, base, small, medium, large, large-v2, large-v3
+            "device": "auto",  # auto (detect best), cpu, cuda, or mps
             "language": "ja",  # Japanese
-            "vad_filter": True,
-            "beam_size": 5,
         },
         # Translation Settings
         "translation": {
@@ -136,6 +163,8 @@ class Config:
         """
         Get setting value using dot notation.
         Example: config.get('asr.model_size')
+
+        Special handling for 'device' settings: if set to 'auto', returns the optimal device
         """
         keys = key_path.split('.')
         value = self.settings
@@ -144,6 +173,11 @@ class Config:
                 value = value[key]
             else:
                 return default
+
+        # Auto-detect device if set to "auto"
+        if key_path.endswith('.device') and value == "auto":
+            return _get_default_device()
+
         return value
 
     def set(self, key_path: str, value: Any):

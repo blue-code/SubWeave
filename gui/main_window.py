@@ -11,6 +11,7 @@ from subtitle.subtitle_pipeline import SubtitlePipeline
 from gui.progress_dialog import ProgressDialog, WorkerThread
 from gui.playlist_widget import PlaylistWidget
 from utils.file_utils import move_to_trash, format_duration
+from utils.video_editor import VideoEditor, VideoMarker
 from core.config import get_config
 
 
@@ -462,6 +463,67 @@ class MainWindow(QtWidgets.QMainWindow):
         self.speed_combo.currentTextChanged.connect(self._on_speed_changed)
         extra_group.addWidget(self.speed_combo)
 
+        extra_group.addSpacing(10)
+
+        # Add marker button
+        self.add_marker_button = QtWidgets.QPushButton("M+")
+        self.add_marker_button.setFixedSize(44, 44)
+        self.add_marker_button.setToolTip("Add Marker at Current Position (M)")
+        self.add_marker_button.setStyleSheet("""
+            QPushButton {
+                font-size: 12px;
+                font-weight: bold;
+            }
+        """)
+        self.add_marker_button.clicked.connect(self._on_add_marker)
+        extra_group.addWidget(self.add_marker_button)
+
+        # Remove marker button
+        self.remove_marker_button = QtWidgets.QPushButton("M-")
+        self.remove_marker_button.setFixedSize(44, 44)
+        self.remove_marker_button.setToolTip("Remove Nearest Marker (Shift+M)")
+        self.remove_marker_button.setStyleSheet("""
+            QPushButton {
+                font-size: 12px;
+                font-weight: bold;
+            }
+        """)
+        self.remove_marker_button.clicked.connect(self._on_remove_marker)
+        extra_group.addWidget(self.remove_marker_button)
+
+        # Split video button
+        self.split_video_button = QtWidgets.QPushButton("Split")
+        self.split_video_button.setFixedSize(60, 44)
+        self.split_video_button.setToolTip("Split Video at Markers (Ctrl+K)")
+        self.split_video_button.setStyleSheet("""
+            QPushButton {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 #ff9a56, stop:1 #ff7b29);
+                border: 1px solid #ff6a19;
+                border-radius: 4px;
+                color: white;
+                font-size: 11px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 #ffaa66, stop:1 #ff8b39);
+            }
+            QPushButton:pressed {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 #ff8a46, stop:1 #ff6b19);
+            }
+            QPushButton:disabled {
+                background: #e0e0e0;
+                color: #a0a0a0;
+                border: 1px solid #d0d0d0;
+            }
+        """)
+        self.split_video_button.clicked.connect(self._on_split_video)
+        extra_group.addWidget(self.split_video_button)
+
+        extra_group.addSpacing(10)
+
         # Fullscreen button
         self.fullscreen_button = QtWidgets.QPushButton()
         self.fullscreen_button.setIcon(style.standardIcon(QtWidgets.QStyle.StandardPixmap.SP_TitleBarMaxButton))
@@ -590,6 +652,18 @@ class MainWindow(QtWidgets.QMainWindow):
 
         delete_shortcut2 = QtGui.QShortcut(QtGui.QKeySequence(QtCore.Qt.Key.Key_Backspace), self)
         delete_shortcut2.activated.connect(self._on_delete_file)
+
+        # Add marker
+        add_marker_shortcut = QtGui.QShortcut(QtGui.QKeySequence("M"), self)
+        add_marker_shortcut.activated.connect(self._on_add_marker)
+
+        # Remove marker
+        remove_marker_shortcut = QtGui.QShortcut(QtGui.QKeySequence("Shift+M"), self)
+        remove_marker_shortcut.activated.connect(self._on_remove_marker)
+
+        # Split video
+        split_video_shortcut = QtGui.QShortcut(QtGui.QKeySequence("Ctrl+K"), self)
+        split_video_shortcut.activated.connect(self._on_split_video)
 
     def _load_settings(self):
         """Load settings from config."""
@@ -1014,6 +1088,112 @@ class MainWindow(QtWidgets.QMainWindow):
                 logging.warning(f"Unsupported file format: {suffix}")
 
         event.ignore()
+
+    def _on_add_marker(self):
+        """Handle add marker action."""
+        if not self.player:
+            return
+
+        position = self.player.get_current_position()
+        self.player.add_marker(position)
+
+        markers = self.player.get_markers()
+        self.statusBar().showMessage(f"Added marker at {format_duration(position)} ({len(markers)} markers total)")
+
+    def _on_remove_marker(self):
+        """Handle remove marker action."""
+        if not self.player:
+            return
+
+        if self.player.remove_nearest_marker():
+            markers = self.player.get_markers()
+            self.statusBar().showMessage(f"Removed marker ({len(markers)} markers remaining)")
+        else:
+            self.statusBar().showMessage("No markers to remove")
+
+    def _on_split_video(self):
+        """Handle split video action."""
+        if not self.current_video_path:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "No Video",
+                "Please open a video file first."
+            )
+            return
+
+        if not self.player:
+            return
+
+        markers = self.player.get_markers()
+
+        if not markers:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "No Markers",
+                "Please add at least one marker before splitting the video."
+            )
+            return
+
+        # Confirm split
+        reply = QtWidgets.QMessageBox.question(
+            self,
+            "Split Video",
+            f"Split video at {len(markers)} marker(s)?\n\nThis will create {len(markers) + 1} video segments.",
+            QtWidgets.QMessageBox.StandardButton.Yes | QtWidgets.QMessageBox.StandardButton.No
+        )
+
+        if reply != QtWidgets.QMessageBox.StandardButton.Yes:
+            return
+
+        # Check if ffmpeg is installed
+        if not VideoEditor.check_ffmpeg_installed():
+            QtWidgets.QMessageBox.critical(
+                self,
+                "FFmpeg Not Found",
+                "FFmpeg is not installed or not in PATH.\n\nPlease install FFmpeg to use video editing features."
+            )
+            return
+
+        # Pause playback
+        if self.player.is_playing():
+            self.player.pause()
+
+        # Create video markers
+        video_markers = [VideoMarker(time_seconds=m, label="") for m in markers]
+
+        try:
+            self.statusBar().showMessage("Splitting video...")
+
+            # Get output directory
+            output_dir = Path(self.current_video_path).parent / f"{Path(self.current_video_path).stem}_split"
+
+            # Split video
+            output_files = VideoEditor.split_video_at_markers(
+                input_path=self.current_video_path,
+                markers=video_markers,
+                output_dir=str(output_dir)
+            )
+
+            self.statusBar().showMessage(f"Video split completed: {len(output_files)} segments created")
+
+            QtWidgets.QMessageBox.information(
+                self,
+                "Split Complete",
+                f"Video split successfully!\n\nCreated {len(output_files)} segments in:\n{output_dir}"
+            )
+
+            # Clear markers
+            self.player.clear_markers()
+            self.statusBar().showMessage("Markers cleared after split")
+
+        except Exception as e:
+            logging.error(f"Failed to split video: {e}")
+            QtWidgets.QMessageBox.critical(
+                self,
+                "Split Failed",
+                f"Failed to split video:\n\n{str(e)}"
+            )
+            self.statusBar().showMessage("Video split failed")
 
     def closeEvent(self, event):
         """Handle window close event."""

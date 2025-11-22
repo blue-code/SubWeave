@@ -3,8 +3,8 @@ Video Player Widget
 Qt Multimedia-based video player with subtitle support for Qt/PySide6.
 Stable and native implementation using Qt's multimedia framework.
 """
-from PySide6 import QtWidgets, QtCore, QtMultimedia, QtMultimediaWidgets
-from typing import Optional
+from PySide6 import QtWidgets, QtCore, QtMultimedia, QtMultimediaWidgets, QtGui
+from typing import Optional, List
 import logging
 from pathlib import Path
 
@@ -82,6 +82,9 @@ class PlayerWidget(QtWidgets.QWidget):
 
         # Subtitle data (parsed from SRT)
         self.subtitle_entries = []
+
+        # Video markers for splitting
+        self.markers: List[float] = []  # List of marker positions in seconds
 
         logging.info("PlayerWidget initialized with Qt Multimedia")
 
@@ -435,6 +438,61 @@ class PlayerWidget(QtWidgets.QWidget):
         if self.player.playbackState() == QtMultimedia.QMediaPlayer.PlaybackState.PlayingState:
             pos = self.player.position() / 1000.0
             self.time_position_changed.emit(pos)
+
+    def add_marker(self, position: Optional[float] = None):
+        """
+        Add a marker at specified position or current playback position.
+
+        Args:
+            position: Position in seconds (None = current position)
+        """
+        if position is None:
+            position = self.get_current_position()
+
+        if position not in self.markers:
+            self.markers.append(position)
+            self.markers.sort()
+            logging.info(f"Added marker at {position:.2f}s")
+
+    def remove_marker(self, position: float, tolerance: float = 0.5):
+        """
+        Remove marker at specified position.
+
+        Args:
+            position: Position in seconds
+            tolerance: Tolerance range for matching markers
+        """
+        for marker in self.markers:
+            if abs(marker - position) <= tolerance:
+                self.markers.remove(marker)
+                logging.info(f"Removed marker at {marker:.2f}s")
+                return True
+        return False
+
+    def remove_nearest_marker(self):
+        """Remove marker nearest to current playback position."""
+        if not self.markers:
+            return False
+
+        current_pos = self.get_current_position()
+        nearest = min(self.markers, key=lambda m: abs(m - current_pos))
+        self.markers.remove(nearest)
+        logging.info(f"Removed nearest marker at {nearest:.2f}s")
+        return True
+
+    def clear_markers(self):
+        """Clear all markers."""
+        self.markers.clear()
+        logging.info("Cleared all markers")
+
+    def get_markers(self) -> List[float]:
+        """
+        Get all markers.
+
+        Returns:
+            List of marker positions in seconds
+        """
+        return self.markers.copy()
 
     def closeEvent(self, event):
         """Handle widget close event."""
